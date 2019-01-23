@@ -1,3 +1,4 @@
+import copy
 import io
 
 from starlette.datastructures import (
@@ -6,6 +7,8 @@ from starlette.datastructures import (
     DatabaseURL,
     FormData,
     Headers,
+    ImmutableMultiDict,
+    MultiDict,
     MutableHeaders,
     QueryParams,
 )
@@ -224,3 +227,122 @@ def test_formdata():
     assert FormData(form) == form
     assert FormData({"a": "123", "b": "789"}) == FormData([("a", "123"), ("b", "789")])
     assert FormData({"a": "123", "b": "789"}) != {"a": "123", "b": "789"}
+
+
+def test_immutable_multidict():
+    q = ImmutableMultiDict([("a", "123"), ("a", "456"), ("b", "789")])
+    assert "a" in q
+    assert "A" not in q
+    assert "c" not in q
+    assert q["a"] == "456"
+    assert q.get("a") == "456"
+    assert q.get("nope", default=None) is None
+    assert q.getlist("a") == ["123", "456"]
+    assert q.getlist("nope") == []
+    assert q.getlist("nope", "default") == "default"
+    assert list(q.keys()) == ["a", "b"]
+    assert list(q.values()) == ["456", "789"]
+    assert list(q.items()) == [("a", "456"), ("b", "789")]
+    assert len(q) == 2
+    assert list(q) == ["a", "b"]
+    assert dict(q) == {"a": "456", "b": "789"}
+    assert str(q) == "ImmutableMultiDict([('a', '123'), ('a', '456'), ('b', '789')])"
+    assert repr(q) == "ImmutableMultiDict([('a', '123'), ('a', '456'), ('b', '789')])"
+    assert ImmutableMultiDict({"a": "123", "b": "456"}) == ImmutableMultiDict(
+        [("a", "123"), ("b", "456")]
+    )
+    assert ImmutableMultiDict({"a": "123", "b": "456"}) == ImmutableMultiDict(
+        a="123", b="456"
+    )
+    assert ImmutableMultiDict({"a": "123", "b": "456"}) == ImmutableMultiDict(
+        {"b": "456", "a": "123"}
+    )
+    assert ImmutableMultiDict() == ImmutableMultiDict({})
+    assert ImmutableMultiDict({"a": "123", "b": "456"}) != "invalid"
+
+    q = ImmutableMultiDict([("a", "123"), ("a", "456")])
+    assert ImmutableMultiDict(q) == q
+
+    q = ImmutableMultiDict([("a", "123"), ("a", ["456"])])
+    assert id(q) != id(copy.copy(q))
+    assert id(q.get("a")) == id(copy.copy(q).get("a"))
+
+    assert id(q) != id(copy.deepcopy(q))
+    assert id(q.get("a")) != id(copy.deepcopy(q).get("a"))
+
+
+def test_multidict():
+    q = MultiDict([("a", "123"), ("a", "456"), ("b", "789")])
+    assert "a" in q
+    assert "A" not in q
+    assert "c" not in q
+    assert q["a"] == "456"
+    assert q.get("a") == "456"
+    assert q.get("nope", default=None) is None
+    assert q.getlist("a") == ["123", "456"]
+    assert q.getlist("nope") == []
+    assert q.getlist("nope", "default") == "default"
+    assert list(q.keys()) == ["a", "b"]
+    assert list(q.values()) == ["456", "789"]
+    assert list(q.items()) == [("a", "456"), ("b", "789")]
+    assert len(q) == 2
+    assert list(q) == ["a", "b"]
+    assert dict(q) == {"a": "456", "b": "789"}
+    assert str(q) == "MultiDict([('a', '123'), ('a', '456'), ('b', '789')])"
+    assert repr(q) == "MultiDict([('a', '123'), ('a', '456'), ('b', '789')])"
+    assert MultiDict({"a": "123", "b": "456"}) == MultiDict(
+        [("a", "123"), ("b", "456")]
+    )
+    assert MultiDict({"a": "123", "b": "456"}) == MultiDict(a="123", b="456")
+    assert MultiDict({"a": "123", "b": "456"}) == MultiDict({"b": "456", "a": "123"})
+    assert MultiDict() == MultiDict({})
+    assert MultiDict({"a": "123", "b": "456"}) != "invalid"
+
+    q = MultiDict([("a", "123"), ("a", "456")])
+    assert q.pop("a") == "456"
+    assert q.getlist("a") == ["123"]
+
+    q = MultiDict([("a", "123"), ("a", "456")])
+    assert q.popitem("a") == ("a", "456")
+    assert q.getlist("a") == ["123"]
+
+    q = MultiDict([("a", "123"), ("a", "456")])
+    assert q.poplist("a") == ["123", "456"]
+    assert repr(q) == "MultiDict([])"
+
+    q = MultiDict([("a", "123"), ("a", "456"), ("b", "789")])
+    del q["a"]
+    assert repr(q) == "MultiDict([('b', '789')])"
+
+    q = MultiDict([("a", "123")])
+    q["a"] = "456"
+    assert repr(q) == "MultiDict([('a', '456')])"
+    q["b"] = "789"
+    assert repr(q) == "MultiDict([('a', '456'), ('b', '789')])"
+
+    q = MultiDict([("a", "123")])
+    assert q.setdefault("a", "456") == "123"
+    assert q.setdefault("b", "789") == "789"
+    assert repr(q) == "MultiDict([('a', '123'), ('b', '789')])"
+
+    q = MultiDict([("a", "123")])
+    q.setlist("a", ["456"])
+    assert repr(q) == "MultiDict([('a', '456')])"
+    q.setlistdefault("b")
+    assert repr(q) == "MultiDict([('a', '456')])"
+    q.setlistdefault("b", ["789"])
+    assert repr(q) == "MultiDict([('a', '456'), ('b', '789')])"
+
+    q = MultiDict([("a", "123")])
+    assert q.pop("a") == "123"
+    assert q.get("a", "default") == "default"
+
+    q = MultiDict([("a", "123"), ("a", "456")])
+    assert MultiDict(q) == q
+
+    q = MultiDict([("a", "123"), ("a", ["456"])])
+    assert id(q) != id(copy.copy(q))
+    assert id(q.get("a")) == id(copy.copy(q).get("a"))
+
+    assert id(q) != id(copy.deepcopy(q))
+    assert id(q.get("a")) != id(copy.deepcopy(q).get("a"))
