@@ -1,3 +1,4 @@
+import copy
 import tempfile
 import typing
 from collections import namedtuple
@@ -223,6 +224,10 @@ class CommaSeparatedStrings(Sequence):
 
 
 class ImmutableMultiDict(typing.Mapping):
+    """
+    An immutable multidict.
+    """
+
     def __init__(
         self,
         value: typing.Union[
@@ -230,51 +235,23 @@ class ImmutableMultiDict(typing.Mapping):
             typing.Mapping,
             typing.List[typing.Tuple[typing.Any, typing.Any]],
         ] = None,
+        **kwargs: typing.Any,
     ) -> None:
-        if value is None:
-            _items = []  # type: typing.List[typing.Tuple[typing.Any, typing.Any]]
-        elif hasattr(value, "multi_items"):
-            value = typing.cast(ImmutableMultiDict, value)
-            _items = list(value.multi_items())
-        elif hasattr(value, "items"):
-            value = typing.cast(typing.Mapping, value)
-            _items = list(value.items())
-        else:
-            value = typing.cast(
-                typing.List[typing.Tuple[typing.Any, typing.Any]], value
-            )
-            _items = list(value)
+        self._dict = {}  # type: typing.Dict
+        self._update(value, **kwargs)
 
-        self._dict = {k: v for k, v in _items}
-        self._list = _items
-
-    def getlist(self, key: typing.Any) -> typing.List[str]:
-        return [item_value for item_key, item_value in self._list if item_key == key]
-
-    def keys(self) -> typing.KeysView:
-        return self._dict.keys()
-
-    def values(self) -> typing.ValuesView:
-        return self._dict.values()
-
-    def items(self) -> typing.ItemsView:
-        return self._dict.items()
-
-    def multi_items(self) -> typing.List[typing.Tuple[str, str]]:
-        return list(self._list)
-
-    def get(self, key: typing.Any, default: typing.Any = None) -> typing.Any:
-        if key in self._dict:
-            return self._dict[key]
-        return default
-
-    def __getitem__(self, key: typing.Any) -> str:
-        return self._dict[key]
+    def __getitem__(self, key: typing.Any) -> typing.Any:
+        list_ = self._dict[key]
+        try:
+            return list_[-1]
+        except IndexError:
+            # TO DISCUSS raise some custom error MultiDictValueError
+            return []
 
     def __contains__(self, key: typing.Any) -> bool:
         return key in self._dict
 
-    def __iter__(self) -> typing.Iterator[typing.Any]:
+    def __iter__(self) -> typing.Iterator:
         return iter(self.keys())
 
     def __len__(self) -> int:
@@ -283,11 +260,131 @@ class ImmutableMultiDict(typing.Mapping):
     def __eq__(self, other: typing.Any) -> bool:
         if not isinstance(other, self.__class__):
             return False
-        return sorted(self._list) == sorted(other._list)
+        return self._dict == other._dict
 
     def __repr__(self) -> str:
-        items = self.multi_items()
-        return f"{self.__class__.__name__}({repr(items)})"
+        return f"{self.__class__.__name__}({repr(list(self.multi_items()))})"
+
+    def get(self, key: typing.Any, default: typing.Any = None) -> typing.Any:
+        try:
+            val = self[key]
+        except KeyError:
+            return default
+        else:
+            if val == []:
+                return default
+            return val
+
+    def getlist(
+        self, key: typing.Any, default: typing.Any = None
+    ) -> typing.List[typing.Any]:
+        try:
+            values = self._dict[key]
+        except KeyError:
+            if default is None:
+                return []
+            return default
+        else:
+            return values
+
+    def keys(self) -> typing.AbstractSet[typing.Any]:  # type: ignore
+        return self._dict.keys()
+
+    def values(self) -> typing.Any:  # type: ignore
+        return [self[key] for key in self]
+
+    def items(self) -> typing.Any:  # type: ignore
+        for key in self:
+            yield key, self[key]
+
+    def multi_items(
+        self
+    ) -> typing.Generator[
+        typing.Tuple[typing.Any, typing.List[typing.Any]], None, None
+    ]:
+        for key, values in self._dict.items():
+            for value in values:
+                yield (key, value)
+
+    def itemslist(self) -> typing.ItemsView[typing.Any, typing.Any]:
+        return typing.cast(typing.ItemsView, self._dict.items())
+
+    def _update(
+        self,
+        iterable: typing.Union[
+            "ImmutableMultiDict",
+            typing.Mapping,
+            typing.List[typing.Tuple[typing.Any, typing.Any]],
+        ] = None,
+        **kwargs: typing.Any,
+    ) -> None:
+        if iterable:
+            if isinstance(iterable, self.__class__):
+                for key, value in iterable.itemslist():
+                    self._dict.setdefault(key, []).extend(value)
+            else:
+                try:
+                    _items = iterable.items()  # type: ignore
+                except AttributeError:
+                    _items = iterable
+
+                for key, value in _items:
+                    self._dict.setdefault(key, []).append(value)
+
+        for key, value in kwargs.items():
+            self._dict.setdefault(key, []).append(value)
+
+
+class MultiDict(ImmutableMultiDict):
+    """
+    A mutable multi value dict
+    """
+
+    def __setitem__(self, key: typing.Any, value: typing.Any) -> None:
+        self._dict[key] = [value]
+        # To discuss
+        # or self.getlist(key).append(value)
+
+    def __delitem__(self, key: typing.Any) -> None:
+        del self._dict[key]
+
+    def __copy__(self) -> "MultiDict":
+        return self.__class__(self)
+
+    def __deepcopy__(self, memo: typing.Dict) -> "MultiDict":
+        copy_ = self.__class__()
+        memo[id(self)] = copy_
+        for key, value in self.itemslist():
+            copy_.setlistdefault(copy.deepcopy(key, memo), copy.deepcopy(value, memo))
+        return copy_
+
+    def setdefault(
+        self, key: typing.Any, default: typing.Any = None
+    ) -> typing.Any:  # mypy: ignore
+        self.setlistdefault(key, [default])
+        return self[key]
+
+    def setlist(self, key: typing.Any, list_: typing.List) -> None:
+        self._dict[key] = list_
+
+    def setlistdefault(
+        self, key: typing.Any, default: typing.Any = None
+    ) -> typing.List[typing.Any]:
+        if key not in self or not self.getlist(key):
+            if default is None:
+                default = []
+            self._dict[key] = default
+
+        return self.getlist(key)
+
+    def pop(self, key: typing.Any) -> typing.Any:
+        return self.getlist(key).pop()
+
+    def poplist(self, key: typing.Any) -> typing.List[typing.Any]:
+        return self._dict.pop(key)
+
+    def popitem(self, key: typing.Any) -> typing.Tuple:
+        return key, self.pop(key)
 
 
 class QueryParams(ImmutableMultiDict):
@@ -326,7 +423,7 @@ class QueryParams(ImmutableMultiDict):
             super().__init__(value)
 
     def __str__(self) -> str:
-        return urlencode(self._list)
+        return urlencode(list(self.multi_items()))
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({repr(str(self))})"
@@ -379,6 +476,9 @@ class FormData(ImmutableMultiDict):
             assert not kwargs, "Unknown parameter"
 
         super().__init__(value)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({list(self.multi_items())})"
 
 
 class Headers(typing.Mapping[str, str]):
